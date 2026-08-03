@@ -2,9 +2,7 @@
 
 import {
   Activity,
-  ArrowDownRight,
   ArrowLeft,
-  ArrowUpRight,
   Bell,
   Building2,
   CalendarDays,
@@ -18,7 +16,6 @@ import {
   HandCoins,
   Home,
   LayoutDashboard,
-  MessageCircle,
   MoreHorizontal,
   Plus,
   ReceiptText,
@@ -29,14 +26,13 @@ import {
   SlidersHorizontal,
   Sparkles,
   Store,
-  TrendingUp,
   UserRound,
   Users,
   WalletCards,
   X,
   Zap,
 } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type View = "dashboard" | "loans" | "settings" | "admin";
 type LoanFilter = "all" | "late" | "today";
@@ -52,8 +48,10 @@ type Loan = {
   status: "late" | "today" | "current";
   lateDays: number;
   nextPayment: string;
+  nextPaymentDate: string;
   installmentAmount: number;
   color: string;
+  frequency: "weekly" | "biweekly" | "monthly";
 };
 
 type Tenant = {
@@ -66,107 +64,82 @@ type Tenant = {
   amount: number;
 };
 
-const initialLoans: Loan[] = [
-  {
-    id: 1,
-    name: "Carlos Méndez",
-    initials: "CM",
-    phone: "+502 5558 1042",
-    total: 12000,
-    remaining: 7200,
-    paidInstallments: 8,
-    installments: 20,
-    status: "late",
-    lateDays: 3,
-    nextPayment: "Hoy, 5:00 p. m.",
-    installmentAmount: 600,
-    color: "terracotta",
-  },
-  {
-    id: 2,
-    name: "María Fernanda López",
-    initials: "ML",
-    phone: "+502 4112 8930",
-    total: 8500,
-    remaining: 5100,
-    paidInstallments: 4,
-    installments: 10,
-    status: "today",
-    lateDays: 0,
-    nextPayment: "Hoy, 6:30 p. m.",
-    installmentAmount: 850,
-    color: "violet",
-  },
-  {
-    id: 3,
-    name: "Jorge Ramírez",
-    initials: "JR",
-    phone: "+502 5019 7741",
-    total: 6000,
-    remaining: 1800,
-    paidInstallments: 7,
-    installments: 10,
-    status: "current",
-    lateDays: 0,
-    nextPayment: "Mañana, 4:00 p. m.",
-    installmentAmount: 600,
-    color: "blue",
-  },
-  {
-    id: 4,
-    name: "Ana Lucía Castillo",
-    initials: "AC",
-    phone: "+502 5633 2107",
-    total: 15000,
-    remaining: 11250,
-    paidInstallments: 5,
-    installments: 20,
-    status: "late",
-    lateDays: 1,
-    nextPayment: "Ayer, 5:30 p. m.",
-    installmentAmount: 750,
-    color: "rose",
-  },
-  {
-    id: 5,
-    name: "Diego Paredes",
-    initials: "DP",
-    phone: "+502 4490 6018",
-    total: 4000,
-    remaining: 2000,
-    paidInstallments: 5,
-    installments: 10,
-    status: "current",
-    lateDays: 0,
-    nextPayment: "12 ago., 3:00 p. m.",
-    installmentAmount: 400,
-    color: "teal",
-  },
-];
-
-const initialTenants: Tenant[] = [
-  { id: 1, name: "Crédito Norte", owner: "Luis Morales", plan: "Pro", loans: 42, status: "Activo", amount: 349 },
-  { id: 2, name: "Préstamos La Ceiba", owner: "Daniela Ruiz", plan: "Básico", loans: 18, status: "Activo", amount: 199 },
-  { id: 3, name: "Capital Express", owner: "Mario García", plan: "Pro", loans: 67, status: "Activo", amount: 349 },
-  { id: 4, name: "Soluciones MZ", owner: "Mónica Zapeta", plan: "Básico", loans: 7, status: "Prueba", amount: 0 },
-];
-
 const money = (value: number) =>
-  new Intl.NumberFormat("es-GT", {
+  new Intl.NumberFormat("es-CR", {
     style: "currency",
-    currency: "GTQ",
+    currency: "CRC",
     maximumFractionDigits: 0,
   }).format(value);
 
+const formatPaymentDate = (date: string) =>
+  new Intl.DateTimeFormat("es-CR", { day: "numeric", month: "short", year: "numeric" }).format(
+    new Date(`${date}T12:00:00`),
+  );
+
+function paymentTiming(date: string) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dueDate = new Date(`${date}T00:00:00`);
+  const difference = Math.floor((dueDate.getTime() - today.getTime()) / 86_400_000);
+  return {
+    status: difference < 0 ? "late" as const : difference === 0 ? "today" as const : "current" as const,
+    lateDays: difference < 0 ? Math.abs(difference) : 0,
+  };
+}
+
+function advancePaymentDate(date: string, frequency: Loan["frequency"]) {
+  const nextDate = new Date(`${date}T12:00:00`);
+  nextDate.setDate(nextDate.getDate() + (frequency === "weekly" ? 7 : frequency === "biweekly" ? 15 : 30));
+  return nextDate.toISOString().slice(0, 10);
+}
+
 export default function HomePage() {
   const [view, setView] = useState<View>("dashboard");
-  const [loans, setLoans] = useState(initialLoans);
-  const [tenants, setTenants] = useState(initialTenants);
+  const [loans, setLoans] = useState<Loan[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
   const [newLoanOpen, setNewLoanOpen] = useState(false);
   const [newTenantOpen, setNewTenantOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    const restoreStorage = window.setTimeout(() => {
+      try {
+        const savedLoans = localStorage.getItem("presta-loans");
+        const savedTenants = localStorage.getItem("presta-tenants");
+        if (savedLoans) {
+          const storedLoans = JSON.parse(savedLoans) as Loan[];
+          setLoans(storedLoans.map((loan) => {
+            const nextPaymentDate = loan.nextPaymentDate || new Date().toISOString().slice(0, 10);
+            return {
+              ...loan,
+              frequency: loan.frequency || "weekly",
+              nextPaymentDate,
+              nextPayment: formatPaymentDate(nextPaymentDate),
+              ...paymentTiming(nextPaymentDate),
+            };
+          }));
+        }
+        if (savedTenants) setTenants(JSON.parse(savedTenants) as Tenant[]);
+      } catch {
+        localStorage.removeItem("presta-loans");
+        localStorage.removeItem("presta-tenants");
+      } finally {
+        setStorageReady(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(restoreStorage);
+  }, []);
+
+  useEffect(() => {
+    if (storageReady) localStorage.setItem("presta-loans", JSON.stringify(loans));
+  }, [loans, storageReady]);
+
+  useEffect(() => {
+    if (storageReady) localStorage.setItem("presta-tenants", JSON.stringify(tenants));
+  }, [tenants, storageReady]);
 
   function goTo(next: View) {
     setView(next);
@@ -196,14 +169,17 @@ export default function HomePage() {
   function registerPayment(loan: Loan) {
     const updated = loans.map((item) =>
       item.id === loan.id
-        ? {
-            ...item,
-            remaining: Math.max(0, item.remaining - item.installmentAmount),
-            paidInstallments: Math.min(item.installments, item.paidInstallments + 1),
-            status: "current" as const,
-            lateDays: 0,
-            nextPayment: "10 ago., 5:00 p. m.",
-          }
+        ? (() => {
+            const nextPaymentDate = advancePaymentDate(item.nextPaymentDate, item.frequency);
+            return {
+              ...item,
+              remaining: Math.max(0, item.remaining - item.installmentAmount),
+              paidInstallments: Math.min(item.installments, item.paidInstallments + 1),
+              nextPaymentDate,
+              nextPayment: formatPaymentDate(nextPaymentDate),
+              ...paymentTiming(nextPaymentDate),
+            };
+          })()
         : item,
     );
     setLoans(updated);
@@ -213,7 +189,7 @@ export default function HomePage() {
 
   return (
     <div className="app-shell">
-      <Sidebar view={view} goTo={goTo} onNewLoan={() => setNewLoanOpen(true)} />
+      <Sidebar view={view} goTo={goTo} loanCount={loans.length} onNewLoan={() => setNewLoanOpen(true)} />
 
       <main className="app-main">
         <Topbar
@@ -292,7 +268,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function Sidebar({ view, goTo, onNewLoan }: { view: View; goTo: (view: View) => void; onNewLoan: () => void }) {
+function Sidebar({ view, goTo, loanCount, onNewLoan }: { view: View; goTo: (view: View) => void; loanCount: number; onNewLoan: () => void }) {
   return (
     <aside className="sidebar">
       <Brand />
@@ -301,7 +277,7 @@ function Sidebar({ view, goTo, onNewLoan }: { view: View; goTo: (view: View) => 
       </button>
       <nav className="side-nav" aria-label="Navegación principal">
         <NavButton active={view === "dashboard"} icon={<LayoutDashboard />} label="Resumen" onClick={() => goTo("dashboard")} />
-        <NavButton active={view === "loans"} icon={<WalletCards />} label="Préstamos" badge="12" onClick={() => goTo("loans")} />
+        <NavButton active={view === "loans"} icon={<WalletCards />} label="Préstamos" badge={String(loanCount)} onClick={() => goTo("loans")} />
         <NavButton active={view === "settings"} icon={<Settings />} label="Configuración" onClick={() => goTo("settings")} />
       </nav>
       <div className="sidebar-spacer" />
@@ -311,8 +287,8 @@ function Sidebar({ view, goTo, onNewLoan }: { view: View; goTo: (view: View) => 
         <ChevronRight size={16} />
       </button>
       <div className="sidebar-user">
-        <Avatar initials="LM" color="ink" />
-        <span><strong>Luis Morales</strong><small>Crédito Norte</small></span>
+        <Avatar initials="TC" color="ink" />
+        <span><strong>Tu cuenta</strong><small>Mi negocio</small></span>
         <MoreHorizontal size={18} />
       </div>
     </aside>
@@ -334,14 +310,14 @@ function Topbar({ admin, profileOpen, setProfileOpen, goTo }: { admin: boolean; 
       {admin ? (
         <button className="back-tenant" onClick={() => goTo("dashboard")}><ArrowLeft size={17} /> Volver al tenant</button>
       ) : (
-        <div className="desktop-context"><span className="eyebrow">ESPACIO DE TRABAJO</span><strong>Crédito Norte</strong></div>
+        <div className="desktop-context"><span className="eyebrow">ESPACIO DE TRABAJO</span><strong>Mi negocio</strong></div>
       )}
       <div className="top-actions">
-        <button className="icon-button notification-button" aria-label="Notificaciones"><Bell size={20} /><span /></button>
+        <button className="icon-button notification-button" aria-label="Notificaciones"><Bell size={20} /></button>
         <div className="profile-wrap">
           <button className="profile-button" onClick={() => setProfileOpen(!profileOpen)} aria-expanded={profileOpen}>
-            <Avatar initials="LM" color="ink" small />
-            <span><strong>Luis Morales</strong><small>Propietario</small></span>
+            <Avatar initials="TC" color="ink" small />
+            <span><strong>Tu cuenta</strong><small>Propietario</small></span>
             <ChevronDown size={15} />
           </button>
           {profileOpen && (
@@ -361,13 +337,16 @@ function Topbar({ admin, profileOpen, setProfileOpen, goTo }: { admin: boolean; 
 function Dashboard({ loans, goTo, setSelectedLoan, onShare }: { loans: Loan[]; goTo: (view: View) => void; setSelectedLoan: (loan: Loan) => void; onShare: (loan: Loan) => void }) {
   const portfolio = loans.reduce((sum, loan) => sum + loan.remaining, 0);
   const dueToday = loans.filter((loan) => loan.status === "today" || loan.status === "late");
+  const dueAmount = dueToday.reduce((sum, loan) => sum + loan.installmentAmount, 0);
+  const recovered = loans.reduce((sum, loan) => sum + (loan.total - loan.remaining), 0);
+  const paidInstallments = loans.reduce((sum, loan) => sum + loan.paidInstallments, 0);
 
   return (
     <div className="page dashboard-page">
       <section className="page-intro">
         <div>
-          <span className="mobile-kicker">LUNES, 3 DE AGOSTO</span>
-          <h1>Hola, Luis <span>👋</span></h1>
+          <span className="mobile-kicker">RESUMEN DE HOY</span>
+          <h1>Hola <span>👋</span></h1>
           <p>Así se mueve tu cartera hoy.</p>
         </div>
         <button className="primary-button desktop-new" onClick={() => goTo("loans")}><Plus size={18} /> Ver préstamos</button>
@@ -379,24 +358,24 @@ function Dashboard({ loans, goTo, setSelectedLoan, onShare }: { loans: Loan[]; g
             <div className="balance-noise" />
             <div className="balance-top">
               <span className="balance-icon"><WalletCards size={21} /></span>
-              <span className="trend-pill"><TrendingUp size={14} /> 8.4%</span>
+              <span className="trend-pill"><WalletCards size={14} /> {loans.length ? "Cartera activa" : "Sin datos"}</span>
             </div>
             <p>Cartera por cobrar</p>
             <h2>{money(portfolio)}</h2>
             <div className="balance-footer">
-              <div><span>Cobrado este mes</span><strong>{money(18650)}</strong></div>
-              <div className="mini-chart" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /></div>
+              <div><span>Total recuperado</span><strong>{money(recovered)}</strong></div>
+              <span className="balance-count">{loans.length} {loans.length === 1 ? "préstamo" : "préstamos"}</span>
             </div>
           </article>
 
           <div className="metric-row">
             <article className="metric-card">
               <span className="metric-icon lime"><Users size={19} /></span>
-              <div><p>Préstamos activos</p><h3>{loans.length + 7}</h3><small><ArrowUpRight size={13} /> 2 nuevos este mes</small></div>
+              <div><p>Préstamos activos</p><h3>{loans.length}</h3><small>{paidInstallments ? `${paidInstallments} cuotas registradas` : "Sin cuotas registradas"}</small></div>
             </article>
             <article className="metric-card">
               <span className="metric-icon peach"><Clock3 size={19} /></span>
-              <div><p>Deben pagar hoy</p><h3>{dueToday.length}</h3><small className="warning-text">{money(2800)} por cobrar</small></div>
+              <div><p>Deben pagar hoy</p><h3>{dueToday.length}</h3><small className="warning-text">{money(dueAmount)} por cobrar</small></div>
             </article>
           </div>
 
@@ -406,23 +385,19 @@ function Dashboard({ loans, goTo, setSelectedLoan, onShare }: { loans: Loan[]; g
               {dueToday.slice(0, 3).map((loan) => (
                 <DueCard key={loan.id} loan={loan} onOpen={() => setSelectedLoan(loan)} onShare={() => onShare(loan)} />
               ))}
+              {dueToday.length === 0 && <div className="compact-empty"><Check size={18} /><div><strong>Todo al día</strong><p>No hay cobros pendientes para hoy.</p></div></div>}
             </div>
           </section>
         </div>
 
         <aside className="activity-column">
           <section className="section-block activity-card">
-            <SectionHeader title="Actividad reciente" action="Historial" />
-            <div className="timeline">
-              <TimelineItem icon={<ArrowDownRight />} tone="green" title="Abono recibido" text="Jorge Ramírez" value="+ Q600" time="Hace 32 min" />
-              <TimelineItem icon={<MessageCircle />} tone="violet" title="Recordatorio enviado" text="María F. López" time="Hace 2 h" />
-              <TimelineItem icon={<Plus />} tone="blue" title="Préstamo creado" text="Diego Paredes" value="Q4,000" time="Ayer" />
-              <TimelineItem icon={<AlertDot />} tone="orange" title="Cuota vencida" text="Ana L. Castillo" time="Ayer" />
-            </div>
+            <SectionHeader title="Actividad reciente" />
+            <div className="activity-empty"><Activity size={22} /><strong>Aún no hay actividad</strong><p>Los préstamos y abonos que registres aparecerán aquí.</p></div>
           </section>
           <article className="tip-card">
             <span><Sparkles size={19} /></span>
-            <div><strong>Tip de cobranza</strong><p>Los recordatorios enviados por la mañana reciben respuesta 24% más rápido.</p></div>
+            <div><strong>Tip de cobranza</strong><p>Enviá recordatorios claros antes del vencimiento y mantené el estado de cuenta actualizado.</p></div>
           </article>
         </aside>
       </section>
@@ -434,9 +409,9 @@ function AlertDot() {
   return <span className="alert-dot">!</span>;
 }
 
-function SectionHeader({ title, action, onClick }: { title: string; action: string; onClick?: () => void }) {
+function SectionHeader({ title, action, onClick }: { title: string; action?: string; onClick?: () => void }) {
   return (
-    <div className="section-header"><h2>{title}</h2><button onClick={onClick}>{action}<ChevronRight size={15} /></button></div>
+    <div className="section-header"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>
   );
 }
 
@@ -456,16 +431,6 @@ function DueCard({ loan, onOpen, onShare }: { loan: Loan; onOpen: () => void; on
   );
 }
 
-function TimelineItem({ icon, tone, title, text, value, time }: { icon: React.ReactNode; tone: string; title: string; text: string; value?: string; time: string }) {
-  return (
-    <div className="timeline-item">
-      <span className={`timeline-icon ${tone}`}>{icon}</span>
-      <div><strong>{title}</strong><p>{text}</p><small>{time}</small></div>
-      {value && <b>{value}</b>}
-    </div>
-  );
-}
-
 function LoansView({ loans, setSelectedLoan, onShare, onNew }: { loans: Loan[]; setSelectedLoan: (loan: Loan) => void; onShare: (loan: Loan) => void; onNew: () => void }) {
   const [filter, setFilter] = useState<LoanFilter>("all");
   const [query, setQuery] = useState("");
@@ -478,7 +443,7 @@ function LoansView({ loans, setSelectedLoan, onShare, onNew }: { loans: Loan[]; 
   return (
     <div className="page loans-page">
       <section className="page-intro loans-intro">
-        <div><span className="mobile-kicker">TU CARTERA</span><h1>Préstamos activos</h1><p>{loans.length + 7} préstamos · {money(loans.reduce((sum, loan) => sum + loan.remaining, 0))} pendientes</p></div>
+        <div><span className="mobile-kicker">TU CARTERA</span><h1>Préstamos activos</h1><p>{loans.length} {loans.length === 1 ? "préstamo" : "préstamos"} · {money(loans.reduce((sum, loan) => sum + loan.remaining, 0))} pendientes</p></div>
         <button className="primary-button desktop-new" onClick={onNew}><Plus size={18} /> Nuevo préstamo</button>
       </section>
       <div className="loan-toolbar">
@@ -495,7 +460,14 @@ function LoansView({ loans, setSelectedLoan, onShare, onNew }: { loans: Loan[]; 
         {visible.map((loan) => (
           <LoanCard key={loan.id} loan={loan} onOpen={() => setSelectedLoan(loan)} onShare={() => onShare(loan)} />
         ))}
-        {visible.length === 0 && <div className="empty-state"><Search size={26} /><strong>No encontramos resultados</strong><p>Prueba con otro nombre o filtro.</p></div>}
+        {visible.length === 0 && (
+          <div className="empty-state">
+            {loans.length === 0 ? <WalletCards size={28} /> : <Search size={26} />}
+            <strong>{loans.length === 0 ? "Aún no hay préstamos" : "No encontramos resultados"}</strong>
+            <p>{loans.length === 0 ? "Creá el primer préstamo para comenzar a gestionar tu cartera." : "Probá con otro nombre o filtro."}</p>
+            {loans.length === 0 && <button className="primary-button" onClick={onNew}><Plus size={16} /> Crear primer préstamo</button>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -531,14 +503,39 @@ function StatusBadge({ status, days }: { status: Loan["status"]; days: number })
 }
 
 function SettingsView({ notify }: { notify: (message: string) => void }) {
-  const [dailyFee, setDailyFee] = useState("25");
-  const [graceDays, setGraceDays] = useState("1");
-  const [surcharge, setSurcharge] = useState(true);
-  const [reminders, setReminders] = useState(true);
+  const [businessName, setBusinessName] = useState("");
+  const [owner, setOwner] = useState("");
+  const [phone, setPhone] = useState("");
+  const [dailyFee, setDailyFee] = useState("");
+  const [graceDays, setGraceDays] = useState("");
+  const [surcharge, setSurcharge] = useState(false);
+  const [reminders, setReminders] = useState(false);
+  const [lateNotices, setLateNotices] = useState(false);
+
+  useEffect(() => {
+    const restoreSettings = window.setTimeout(() => {
+      const saved = localStorage.getItem("presta-settings");
+      if (!saved) return;
+      try {
+        const settings = JSON.parse(saved);
+        setBusinessName(settings.businessName || "");
+        setOwner(settings.owner || "");
+        setPhone(settings.phone || "");
+        setDailyFee(settings.dailyFee || "");
+        setGraceDays(settings.graceDays || "");
+        setSurcharge(Boolean(settings.surcharge));
+        setReminders(Boolean(settings.reminders));
+        setLateNotices(Boolean(settings.lateNotices));
+      } catch {
+        localStorage.removeItem("presta-settings");
+      }
+    }, 0);
+    return () => window.clearTimeout(restoreSettings);
+  }, []);
 
   function save(event: FormEvent) {
     event.preventDefault();
-    localStorage.setItem("presta-settings", JSON.stringify({ dailyFee, graceDays, surcharge, reminders }));
+    localStorage.setItem("presta-settings", JSON.stringify({ businessName, owner, phone, dailyFee, graceDays, surcharge, reminders, lateNotices }));
     notify("Configuración guardada");
   }
 
@@ -549,24 +546,24 @@ function SettingsView({ notify }: { notify: (message: string) => void }) {
         <section className="settings-card">
           <div className="settings-card-title"><span className="settings-icon"><Store size={19} /></span><div><h2>Información del negocio</h2><p>Estos datos aparecerán en los estados de cuenta.</p></div></div>
           <div className="form-grid">
-            <label><span>Nombre comercial</span><input defaultValue="Crédito Norte" /></label>
-            <label><span>Nombre del responsable</span><input defaultValue="Luis Morales" /></label>
-            <label><span>Teléfono / WhatsApp</span><input defaultValue="+502 5555 0192" /></label>
-            <label><span>Moneda</span><select defaultValue="GTQ"><option value="GTQ">GTQ — Quetzal</option><option value="USD">USD — Dólar</option></select></label>
+            <label><span>Nombre comercial</span><input value={businessName} onChange={(event) => setBusinessName(event.target.value)} placeholder="Nombre de tu negocio" /></label>
+            <label><span>Nombre del responsable</span><input value={owner} onChange={(event) => setOwner(event.target.value)} placeholder="Tu nombre completo" /></label>
+            <label><span>Teléfono / WhatsApp</span><input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+506 8888 8888" /></label>
+            <label><span>Moneda</span><select value="CRC" disabled><option value="CRC">CRC — Colón costarricense</option></select></label>
           </div>
         </section>
         <section className="settings-card">
           <div className="settings-card-title"><span className="settings-icon peach"><Clock3 size={19} /></span><div><h2>Atrasos y recargos</h2><p>Define las reglas que se aplican a las cuotas vencidas.</p></div></div>
           <SettingToggle title="Cobrar recargo por atraso" description="Se suma automáticamente después del período de gracia." checked={surcharge} onChange={setSurcharge} />
           <div className={`inline-fields ${!surcharge ? "disabled" : ""}`}>
-            <label><span>Recargo diario</span><div className="input-prefix"><b>Q</b><input type="number" value={dailyFee} onChange={(event) => setDailyFee(event.target.value)} /></div><small>Por cada día de atraso</small></label>
+            <label><span>Recargo diario</span><div className="input-prefix"><b>₡</b><input type="number" min="0" value={dailyFee} onChange={(event) => setDailyFee(event.target.value)} placeholder="1000" /></div><small>Por cada día de atraso</small></label>
             <label><span>Período de gracia</span><div className="input-suffix"><input type="number" value={graceDays} onChange={(event) => setGraceDays(event.target.value)} /><b>días</b></div><small>Antes de aplicar el recargo</small></label>
           </div>
         </section>
         <section className="settings-card">
           <div className="settings-card-title"><span className="settings-icon violet"><Bell size={19} /></span><div><h2>Recordatorios</h2><p>Mantén informados a tus clientes.</p></div></div>
           <SettingToggle title="Recordatorios automáticos" description="Enviar un WhatsApp un día antes de cada cuota." checked={reminders} onChange={setReminders} />
-          <SettingToggle title="Aviso de atraso" description="Enviar un aviso al primer día de atraso." checked={true} onChange={() => {}} />
+          <SettingToggle title="Aviso de atraso" description="Enviar un aviso al primer día de atraso." checked={lateNotices} onChange={setLateNotices} />
         </section>
         <div className="settings-actions"><button type="button" className="secondary-button">Cancelar</button><button className="primary-button"><Check size={17} /> Guardar cambios</button></div>
       </form>
@@ -583,7 +580,10 @@ function SettingToggle({ title, description, checked, onChange }: { title: strin
 function AdminView({ tenants, setTenants, goTo, onNewTenant, notify }: { tenants: Tenant[]; setTenants: (tenants: Tenant[]) => void; goTo: (view: View) => void; onNewTenant: () => void; notify: (message: string) => void }) {
   const [query, setQuery] = useState("");
   const visible = tenants.filter((tenant) => tenant.name.toLowerCase().includes(query.toLowerCase()) || tenant.owner.toLowerCase().includes(query.toLowerCase()));
-  const mrr = tenants.reduce((sum, tenant) => sum + tenant.amount, 0) + 4485;
+  const activeTenants = tenants.filter((tenant) => tenant.status === "Activo");
+  const trialTenants = tenants.filter((tenant) => tenant.status === "Prueba");
+  const mrr = activeTenants.reduce((sum, tenant) => sum + tenant.amount, 0);
+  const managedLoans = tenants.reduce((sum, tenant) => sum + tenant.loans, 0);
 
   function toggleTenant(tenant: Tenant) {
     const nextStatus = tenant.status === "Suspendido" ? "Activo" : "Suspendido";
@@ -598,10 +598,10 @@ function AdminView({ tenants, setTenants, goTo, onNewTenant, notify }: { tenants
         <button className="admin-new" onClick={onNewTenant}><Plus size={18} /> Nuevo tenant</button>
       </section>
       <div className="admin-metrics">
-        <AdminMetric icon={<Building2 />} tone="lime" label="Tenants activos" value="18" detail="+3 este mes" direction="up" />
-        <AdminMetric icon={<CircleDollarSign />} tone="violet" label="Ingreso mensual" value={money(mrr)} detail="+12.8% vs. julio" direction="up" />
-        <AdminMetric icon={<Activity />} tone="peach" label="Préstamos gestionados" value="684" detail="Q1.8M en cartera" />
-        <AdminMetric icon={<Gauge />} tone="blue" label="En período de prueba" value="4" detail="2 vencen esta semana" />
+        <AdminMetric icon={<Building2 />} tone="lime" label="Tenants activos" value={String(activeTenants.length)} detail={`${tenants.length} registrados`} />
+        <AdminMetric icon={<CircleDollarSign />} tone="violet" label="Ingreso mensual" value={money(mrr)} detail="Mensualidades activas" />
+        <AdminMetric icon={<Activity />} tone="peach" label="Préstamos gestionados" value={String(managedLoans)} detail="Entre todos los tenants" />
+        <AdminMetric icon={<Gauge />} tone="blue" label="En período de prueba" value={String(trialTenants.length)} detail="Pendientes de activación" />
       </div>
       <section className="tenant-section">
         <div className="tenant-section-head"><div><h2>Tenants</h2><p>Todos los espacios de trabajo registrados.</p></div><label className="search-box admin-search"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar tenant..." /></label></div>
@@ -617,16 +617,23 @@ function AdminView({ tenants, setTenants, goTo, onNewTenant, notify }: { tenants
               <button className="tenant-menu" onClick={() => toggleTenant(tenant)} aria-label={`${tenant.status === "Suspendido" ? "Reactivar" : "Suspender"} ${tenant.name}`} title={tenant.status === "Suspendido" ? "Reactivar" : "Suspender"}><MoreHorizontal size={19} /></button>
             </div>
           ))}
+          {visible.length === 0 && (
+            <div className="tenant-empty">
+              <Building2 size={24} />
+              <div><strong>{tenants.length === 0 ? "Aún no hay tenants" : "Sin resultados"}</strong><p>{tenants.length === 0 ? "Creá el primero para comenzar a gestionar clientes SaaS." : "Probá con otro término de búsqueda."}</p></div>
+              {tenants.length === 0 && <button className="primary-button" onClick={onNewTenant}><Plus size={16} /> Crear tenant</button>}
+            </div>
+          )}
         </div>
       </section>
-      <button className="admin-mobile-back" onClick={() => goTo("dashboard")}><ArrowLeft size={17} /> Entrar a Crédito Norte</button>
+      <button className="admin-mobile-back" onClick={() => goTo("dashboard")}><ArrowLeft size={17} /> Volver al panel del tenant</button>
     </div>
   );
 }
 
-function AdminMetric({ icon, tone, label, value, detail, direction }: { icon: React.ReactNode; tone: string; label: string; value: string; detail: string; direction?: "up" }) {
+function AdminMetric({ icon, tone, label, value, detail }: { icon: React.ReactNode; tone: string; label: string; value: string; detail: string }) {
   return (
-    <article className="admin-metric"><span className={`admin-metric-icon ${tone}`}>{icon}</span><p>{label}</p><h3>{value}</h3><small className={direction ? "positive" : ""}>{direction && <ArrowUpRight size={13} />}{detail}</small></article>
+    <article className="admin-metric"><span className={`admin-metric-icon ${tone}`}>{icon}</span><p>{label}</p><h3>{value}</h3><small>{detail}</small></article>
   );
 }
 
@@ -662,7 +669,7 @@ function LoanSheet({ loan, onClose, onShare, onPayment }: { loan: Loan; onClose:
           <div><span>Cuotas pagadas</span><strong>{loan.paidInstallments} de {loan.installments}</strong></div>
           <div><span>Próximo cobro</span><strong>{loan.nextPayment}</strong></div>
         </div>
-        {loan.status === "late" && <div className="late-notice"><AlertDot /><div><strong>Pago atrasado por {loan.lateDays} días</strong><p>Recargo acumulado: {money(loan.lateDays * 25)}</p></div></div>}
+        {loan.status === "late" && <div className="late-notice"><AlertDot /><div><strong>Pago atrasado por {loan.lateDays} días</strong><p>El recargo se calculará según la configuración del negocio.</p></div></div>}
         <div className="sheet-actions"><button className="secondary-button" onClick={onShare}><Share2 size={18} /> Compartir estado</button><button className="primary-button" onClick={onPayment}><CircleDollarSign size={18} /> Registrar abono</button></div>
       </div>
     </div>
@@ -672,13 +679,16 @@ function LoanSheet({ loan, onClose, onShare, onPayment }: { loan: Loan; onClose:
 function NewLoanModal({ onClose, onCreate }: { onClose: () => void; onCreate: (loan: Loan) => void }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [amount, setAmount] = useState("5000");
-  const [installments, setInstallments] = useState("10");
+  const [amount, setAmount] = useState("");
+  const [installments, setInstallments] = useState("");
+  const [frequency, setFrequency] = useState<Loan["frequency"]>("weekly");
+  const [firstPayment, setFirstPayment] = useState("");
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const total = Number(amount);
     const count = Number(installments);
+    const timing = paymentTiming(firstPayment);
     onCreate({
       id: Date.now(),
       name,
@@ -688,11 +698,12 @@ function NewLoanModal({ onClose, onCreate }: { onClose: () => void; onCreate: (l
       remaining: total,
       paidInstallments: 0,
       installments: count,
-      status: "current",
-      lateDays: 0,
-      nextPayment: "10 ago., 5:00 p. m.",
+      ...timing,
+      nextPayment: formatPaymentDate(firstPayment),
+      nextPaymentDate: firstPayment,
       installmentAmount: Math.ceil(total / count),
       color: "teal",
+      frequency,
     });
   }
 
@@ -703,9 +714,10 @@ function NewLoanModal({ onClose, onCreate }: { onClose: () => void; onCreate: (l
         <div className="sheet-head"><div><span className="sheet-kicker">NUEVO REGISTRO</span><h2>Crear préstamo</h2></div><button type="button" className="icon-button" onClick={onClose} aria-label="Cerrar"><X size={20} /></button></div>
         <div className="form-stack">
           <label><span>Nombre del cliente</span><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Sofía Martínez" /></label>
-          <label><span>Teléfono / WhatsApp</span><input required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+502 5555 0000" /></label>
-          <div className="two-fields"><label><span>Monto del préstamo</span><div className="input-prefix"><b>Q</b><input required type="number" min="100" value={amount} onChange={(event) => setAmount(event.target.value)} /></div></label><label><span>Número de cuotas</span><input required type="number" min="1" value={installments} onChange={(event) => setInstallments(event.target.value)} /></label></div>
-          <label><span>Frecuencia de pago</span><select defaultValue="weekly"><option value="weekly">Semanal</option><option value="biweekly">Quincenal</option><option value="monthly">Mensual</option></select></label>
+          <label><span>Teléfono / WhatsApp</span><input required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+506 8888 8888" /></label>
+          <div className="two-fields"><label><span>Monto del préstamo</span><div className="input-prefix"><b>₡</b><input required type="number" min="1000" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="100000" /></div></label><label><span>Número de cuotas</span><input required type="number" min="1" value={installments} onChange={(event) => setInstallments(event.target.value)} placeholder="10" /></label></div>
+          <label><span>Frecuencia de pago</span><select value={frequency} onChange={(event) => setFrequency(event.target.value as Loan["frequency"])}><option value="weekly">Semanal</option><option value="biweekly">Quincenal</option><option value="monthly">Mensual</option></select></label>
+          <label><span>Fecha del primer pago</span><input required type="date" value={firstPayment} onChange={(event) => setFirstPayment(event.target.value)} /></label>
           <div className="calculated-payment"><span>Cuota estimada</span><strong>{money(Math.ceil(Number(amount || 0) / Number(installments || 1)))}</strong></div>
         </div>
         <button className="primary-button modal-submit"><Plus size={18} /> Crear préstamo</button>

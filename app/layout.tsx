@@ -21,7 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
       title: "Presta+ | Tus préstamos, bajo control",
       description: "Gestiona préstamos, cobros, clientes y cuotas desde una sola app.",
       type: "website",
-      locale: "es_GT",
+      locale: "es_CR",
       images: [{ url: ogImage, width: 1536, height: 1024, alt: "Presta+ — Tus préstamos, bajo control" }],
     },
     twitter: {
